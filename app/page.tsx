@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { RefreshCw, ArrowRight } from "lucide-react"
+import { RefreshCw, ArrowRight, Menu, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 
 interface Team {
@@ -45,6 +45,8 @@ export default function HangmanGame() {
   const [wordError, setWordError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [setupProgress, setSetupProgress] = useState("")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [showRoundStartLeaderboard, setShowRoundStartLeaderboard] = useState(false)
 
   const currentGameWord = words[currentWordIndex]
   const maxWrongGuesses = 4
@@ -65,7 +67,7 @@ export default function HangmanGame() {
     if (!currentGameWord) return
 
     const wordLength = currentGameWord.word.length
-    const numToReveal = Math.min(3, Math.floor(wordLength * 0.3)) // Reveal 2-3 letters or 30% of word
+    const numToReveal = Math.min(4, Math.floor(wordLength * 0.3)) // Reveal 2-3 letters or 30% of word
     const positions: number[] = []
 
     // Randomly select positions to reveal
@@ -118,7 +120,7 @@ export default function HangmanGame() {
       await autoStartGame(teamsData, wordsData)
     } catch (error) {
       console.error("Error loading data:", error)
-      setWordError(`Database error: ${error.message}`)
+      setWordError(`Database error: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setIsLoading(false)
       setSetupProgress("")
@@ -183,6 +185,12 @@ export default function HangmanGame() {
     setWrongGuesses(0)
     setGameState("playing")
     setInputLetter("")
+    
+    // Show leaderboard for 5 seconds at start of new round
+    setShowRoundStartLeaderboard(true)
+    setTimeout(() => {
+      setShowRoundStartLeaderboard(false)
+    }, 5000)
   }
 
   const updateGameScore = async (teamId: number, points: number) => {
@@ -267,15 +275,18 @@ export default function HangmanGame() {
         setTimeout(passQuestion, 2000)
       }
     } else {
-      // Reveal one occurrence of the letter at a time
+      // Letter exists in the word - find all positions of this letter
       const wordArray = currentGameWord.word.split("")
       const letterPositions = wordArray.map((char, index) => (char === letter ? index : -1)).filter((pos) => pos !== -1)
 
-      // Find the first position of this letter that hasn't been revealed yet
-      const unrevealedPosition = letterPositions.find((pos) => !revealedPositions.includes(pos))
+      // Find all positions of this letter that haven't been revealed yet (excluding default revealed positions)
+      const unrevealedPositions = letterPositions.filter((pos) => 
+        !revealedPositions.includes(pos) && !defaultRevealedPositions.includes(pos)
+      )
 
-      if (unrevealedPosition !== undefined) {
-        const newRevealedPositions = [...revealedPositions, unrevealedPosition]
+      if (unrevealedPositions.length > 0) {
+        // Reveal only the FIRST unrevealed occurrence of this letter
+        const newRevealedPositions = [...revealedPositions, unrevealedPositions[0]]
         setRevealedPositions(newRevealedPositions)
 
         // Check if word is complete (all positions revealed or default revealed)
@@ -306,6 +317,15 @@ export default function HangmanGame() {
             }
             resetGame()
           }, 2000)
+        }
+      } else {
+        // All instances of this letter are already revealed, treat as wrong guess
+        const newWrongGuesses = wrongGuesses + 1
+        setWrongGuesses(newWrongGuesses)
+
+        if (newWrongGuesses >= maxWrongGuesses) {
+          // Don't reveal answer here, just pass to next team
+          setTimeout(passQuestion, 2000)
         }
       }
     }
@@ -339,28 +359,90 @@ export default function HangmanGame() {
       .sort((a, b) => b.points - a.points)
   }
 
-  const HangmanDrawing = ({ stage }: { stage: number }) => (
-    <svg width="200" height="250" viewBox="0 0 200 250" className="border rounded-lg bg-white">
-      <line x1="10" y1="230" x2="150" y2="230" stroke="brown" strokeWidth="4" />
-      <line x1="30" y1="230" x2="30" y2="20" stroke="brown" strokeWidth="4" />
-      <line x1="30" y1="20" x2="120" y2="20" stroke="brown" strokeWidth="4" />
-      {stage >= 1 && <line x1="120" y1="20" x2="120" y2="50" stroke="brown" strokeWidth="3" />}
-      {stage >= 2 && <circle cx="120" cy="65" r="15" stroke="black" strokeWidth="2" fill="none" />}
-      {stage >= 3 && <line x1="120" y1="80" x2="120" y2="160" stroke="black" strokeWidth="2" />}
-      {stage >= 4 && (
-        <>
-          <line x1="120" y1="100" x2="100" y2="130" stroke="black" strokeWidth="2" />
-          <line x1="120" y1="100" x2="140" y2="130" stroke="black" strokeWidth="2" />
-          <line x1="120" y1="160" x2="100" y2="190" stroke="black" strokeWidth="2" />
-          <line x1="120" y1="160" x2="140" y2="190" stroke="black" strokeWidth="2" />
-        </>
-      )}
-    </svg>
-  )
+  const HangmanDrawing = ({ stage }: { stage: number }) => {
+    const funnyMessages = [
+      "💀 Oops! Better luck next time!",
+      "😵 The hangman got me!",
+      "🪦 RIP Letter Guesser",
+      "💀 Game Over, Man!",
+      "😮‍💨 I should have studied more letters!",
+      "🎭 This is awkward...",
+      "💀 At least I tried!",
+      "😅 Note to self: Learn the alphabet!",
+      "🤷‍♂️ Maybe next word?",
+      "💀 Well, that escalated quickly!"
+    ]
+    
+    const randomMessage = funnyMessages[Math.floor(Math.random() * funnyMessages.length)]
+    
+    return (
+      <div className="relative">
+        <svg width="350" height="400" viewBox="0 0 350 400" className="border rounded-lg bg-white shadow-md">
+          <line x1="20" y1="370" x2="250" y2="370" stroke="#44311f" strokeWidth="8" />
+          <line x1="60" y1="370" x2="60" y2="30" stroke="#44311f" strokeWidth="8" />
+          <line x1="60" y1="30" x2="200" y2="30" stroke="#44311f" strokeWidth="8" />
+          {stage >= 1 && <line x1="200" y1="30" x2="200" y2="80" stroke="#44311f" strokeWidth="6" />}
+          {stage >= 2 && <circle cx="200" cy="110" r="25" stroke="black" strokeWidth="4" fill="none" />}
+          {stage >= 3 && <line x1="200" y1="135" x2="200" y2="280" stroke="black" strokeWidth="4" />}
+          {stage >= 4 && (
+            <>
+              <line x1="200" y1="170" x2="170" y2="220" stroke="black" strokeWidth="4" />
+              <line x1="200" y1="170" x2="230" y2="220" stroke="black" strokeWidth="4" />
+              <line x1="200" y1="280" x2="170" y2="330" stroke="black" strokeWidth="4" />
+              <line x1="200" y1="280" x2="230" y2="330" stroke="black" strokeWidth="4" />
+            </>
+          )}
+          
+          {/* Add funny face when hangman is complete */}
+          {stage >= 2 && (
+            <>
+              {/* Eyes */}
+              {stage >= 4 ? (
+                <>
+                  {/* Dead X eyes */}
+                  <line x1="190" y1="100" x2="195" y2="105" stroke="red" strokeWidth="3" />
+                  <line x1="195" y1="100" x2="190" y2="105" stroke="red" strokeWidth="3" />
+                  <line x1="205" y1="100" x2="210" y2="105" stroke="red" strokeWidth="3" />
+                  <line x1="210" y1="100" x2="205" y2="105" stroke="red" strokeWidth="3" />
+                </>
+              ) : (
+                <>
+                  {/* Normal eyes */}
+                  <circle cx="192" cy="105" r="3" fill="black" />
+                  <circle cx="208" cy="105" r="3" fill="black" />
+                </>
+              )}
+              
+              {/* Mouth */}
+              {stage >= 4 ? (
+                /* Sad mouth when dead */
+                <path d="M 185 125 Q 200 135 215 125" stroke="black" strokeWidth="2" fill="none" />
+              ) : (
+                /* Worried mouth */
+                <ellipse cx="200" cy="120" rx="8" ry="4" stroke="black" strokeWidth="2" fill="none" />
+              )}
+            </>
+          )}
+        </svg>
+        
+        {/* Funny message when hangman is complete */}
+        {stage >= 4 && (
+          <div className="absolute -bottom-16 left-1/2 transform -translate-x-1/2 w-full">
+            <div className="bg-[#d9a65a] bg-opacity-90 text-[#44311f] text-center p-3 rounded-lg border-2 border-[#44311f] shadow-lg animate-bounce">
+              <p className="text-lg font-bold">{randomMessage}</p>
+              <div className="text-2xl mt-1">
+                {stage >= 4 && "💀🎭🤷‍♂️"}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   if (gameState === "loading") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-100 via-orange-50 to-yellow-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-[#d9a65a] via-[#886636] to-[#44311f] flex items-center justify-center">
         <Card className="w-96">
           <CardContent className="flex flex-col items-center justify-center p-8">
             <RefreshCw className="w-8 h-8 animate-spin mr-3" />
@@ -374,7 +456,7 @@ export default function HangmanGame() {
 
   if (wordError) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-100 via-orange-50 to-yellow-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-[#d9a65a] via-[#886636] to-[#44311f] flex items-center justify-center">
         <Card className="w-96">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold text-red-600">Error</CardTitle>
@@ -396,18 +478,18 @@ export default function HangmanGame() {
     const winner = sortedTeams[0]
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-400 to-blue-600 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-[#44311f] to-[#886636] flex items-center justify-center">
         <Card className="w-96">
           <CardHeader className="text-center">
-            <CardTitle className="text-3xl font-bold text-green-600">🏆 Game Finished!</CardTitle>
+            <CardTitle className="text-3xl font-bold text-[#d9a65a]">🏆 Game Finished!</CardTitle>
           </CardHeader>
           <CardContent className="text-center space-y-4">
-            <div className="text-2xl font-bold text-yellow-600">Winner: {winner.name}</div>
+            <div className="text-2xl font-bold text-[#d9a65a]">Winner: {winner.name}</div>
             <div className="text-xl">Final Score: {winner.points} points</div>
             <div className="space-y-2">
               <h3 className="font-semibold">Final Leaderboard:</h3>
               {sortedTeams.map((team, index) => (
-                <div key={team.id} className="flex justify-between items-center p-2 bg-gray-100 rounded">
+                <div key={team.id} className="flex justify-between items-center p-2 bg-[#d9a65a] bg-opacity-20 rounded">
                   <span>
                     #{index + 1} Team {team.teamNumber}: {team.name}
                   </span>
@@ -415,7 +497,7 @@ export default function HangmanGame() {
                 </div>
               ))}
             </div>
-            <Button onClick={() => window.location.reload()} className="w-full">
+            <Button onClick={() => window.location.reload()} className="w-full bg-[#44311f] hover:bg-[#886636]">
               Start New Game
             </Button>
           </CardContent>
@@ -428,20 +510,158 @@ export default function HangmanGame() {
   const sortedTeams = getTeamScores()
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-100 via-orange-50 to-yellow-100 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-[#d9a65a] via-[#886636] to-[#44311f] p-4">
+      {/* Right Side Leaderboard */}
+      <div
+        className={`fixed top-0 right-0 h-full w-90 bg-white shadow-lg transform transition-transform duration-300 ease-in-out z-50 ${
+          sidebarOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="p-4 border-b bg-[#44311f]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-[#d9a65a]">🏺 Leaderboard</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarOpen(false)}
+              className="hover:bg-[#886636] text-[#d9a65a]"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="p-4 overflow-y-auto h-full">
+          <div className="space-y-4">
+            {sortedTeams.map((team, leaderboardIndex) => {
+              const teamScore = gameScores.find((score) => score.team_id === team.id)?.points || 0
+              const originalTeamIndex = teams.findIndex((t) => t.id === team.id)
+              return (
+                <div
+                  key={team.id}
+                  className={`p-4 rounded-lg border-2 ${
+                    originalTeamIndex === currentTeam
+                      ? "border-[#d9a65a] bg-[#d9a65a] bg-opacity-20"
+                      : originalTeamIndex === originalTeamForQuestion
+                        ? "border-[#886636] bg-[#886636] bg-opacity-20"
+                        : "border-gray-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl font-bold">#{leaderboardIndex + 1}</div>
+                      <div className={`w-4 h-4 rounded-full ${team.color}`}></div>
+                      <div className="font-semibold text-lg">
+                        Team {originalTeamIndex + 1}: {team.name}
+                      </div>
+                      {originalTeamIndex === originalTeamForQuestion && (
+                        <Badge variant="outline" className="text-xs bg-[#886636] bg-opacity-30 border-[#886636]">
+                          Assigned
+                        </Badge>
+                      )}
+                      {teamsAttempted.includes(originalTeamIndex) && (
+                        <Badge variant="outline" className="text-xs bg-[#44311f] bg-opacity-30 border-[#44311f]">
+                          Attempted
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-2xl font-bold text-[#44311f]">{teamScore}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       <div className="max-w-6xl mx-auto">
+        {/* Round Start Leaderboard Overlay */}
+        {showRoundStartLeaderboard && (
+          <div className="fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 shadow-2xl border-4 border-[#d9a65a]">
+              <div className="text-center mb-6">
+                <h2 className="text-3xl font-bold text-[#44311f] mb-2">🏆 Current Leaderboard 🏆</h2>
+                <p className="text-[#886636]">Quest {currentWordIndex + 1} Starting...</p>
+              </div>
+              
+              <div className="space-y-3">
+                {getTeamScores().map((team, index) => {
+                  const originalTeamIndex = teams.findIndex((t) => t.id === team.id)
+                  return (
+                    <div
+                      key={team.id}
+                      className={`flex items-center justify-between p-4 rounded-lg border-2 ${
+                        originalTeamIndex === currentTeam
+                          ? "border-[#d9a65a] bg-[#d9a65a] bg-opacity-30 animate-pulse"
+                          : "border-[#886636] bg-[#886636] bg-opacity-10"
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="text-3xl font-bold text-[#44311f]">#{index + 1}</div>
+                        <div className={`w-6 h-6 rounded-full ${team.color}`}></div>
+                        <div>
+                          <div className="font-bold text-lg text-[#44311f]">
+                            Team {originalTeamIndex + 1}: {team.name}
+                          </div>
+                          {originalTeamIndex === currentTeam && (
+                            <div className="text-sm text-[#d9a65a] font-semibold">← Current Turn</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-3xl font-bold text-[#44311f]">{team.points} pts</div>
+                    </div>
+                  )
+                })}
+              </div>
+              
+              <div className="text-center mt-6">
+                <div className="text-sm text-[#886636]">
+                  Auto-closing in <span className="font-bold">5 seconds</span>...
+                </div>
+                <button
+                  onClick={() => setShowRoundStartLeaderboard(false)}
+                  className="mt-2 px-4 py-2 bg-[#44311f] text-[#d9a65a] rounded-lg hover:bg-[#886636] transition-colors"
+                >
+                  Continue Game
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="text-center mb-6">
-          <h1 className="text-4xl font-bold text-amber-700 mb-2">⚔️ Word Quest</h1>
+          <div className="flex items-center justify-between mb-4">
+            <div className="w-24"></div> {/* Spacer for centering */}
+            <h1 className="text-4xl font-bold text-[#44311f] flex items-center gap-2">
+              <span>🏔️</span> Belmonts Quest
+            </h1>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSidebarOpen(true)}
+              className="bg-[#d9a65a] bg-opacity-30 border-[#44311f] hover:bg-[#d9a65a] hover:bg-opacity-50 text-[#44311f]"
+            >
+              <Menu className="w-4 h-4 mr-2" />
+              Leaderboard
+            </Button>
+          </div>
           <div className="flex justify-center gap-4 text-sm flex-wrap mb-4">
-            <Badge variant="outline" className="bg-amber-50 border-amber-300">
+            <Badge variant="outline" className="bg-[#d9a65a] bg-opacity-30 border-[#44311f] text-[#44311f]">
               Quest: {currentWordIndex + 1}/{words.length}
             </Badge>
-            <Badge className="bg-amber-600 text-white">Assigned to: {teams[originalTeamForQuestion]?.name}</Badge>
+            <Badge className="bg-[#44311f] text-[#d9a65a]">Assigned to: {teams[originalTeamForQuestion]?.name}</Badge>
             <Badge className={teams[currentTeam]?.color + " text-white"}>Current: {teams[currentTeam]?.name}</Badge>
-            <Badge variant="secondary" className="bg-stone-200">
+            <Badge variant="secondary" className="bg-[#886636] text-white">
               Tribes Attempted: {teamsAttempted.length + 1}/4
             </Badge>
-            {isPassedQuestion && <Badge className="bg-orange-500 text-white">Passed Quest (5 pts)</Badge>}
+            {isPassedQuestion && <Badge className="bg-[#d9a65a] text-black">Passed Quest (5 pts)</Badge>}
           </div>
         </div>
 
@@ -450,9 +670,9 @@ export default function HangmanGame() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-center text-amber-800">Gallows</CardTitle>
+                <CardTitle className="text-center text-[#44311f]">Gallows</CardTitle>
                 <div className="text-center">
-                  <Badge variant={wrongGuesses >= maxWrongGuesses ? "destructive" : "secondary"}>
+                  <Badge variant={wrongGuesses >= maxWrongGuesses ? "destructive" : "secondary"} className="bg-[#886636] text-white">
                     Wrong Guesses: {wrongGuesses}/{maxWrongGuesses}
                   </Badge>
                 </div>
@@ -461,21 +681,21 @@ export default function HangmanGame() {
                 <HangmanDrawing stage={wrongGuesses} />
               </CardContent>
             </Card>
+          </div>
 
-            {/* Game Area */}
-            <Card>
+          {/* Right Side - Sacred Word */}
+          <div>
+            <Card className="h-full">
               <CardHeader>
-                <CardTitle className="text-center text-amber-800">Sacred Word</CardTitle>
-                <p className="text-center text-sm text-amber-600">{currentGameWord?.word.length} letters</p>
+                <CardTitle className="text-center text-[#44311f]">Sacred Word</CardTitle>
+                <p className="text-center text-sm text-[#886636]">{currentGameWord?.word.length} letters</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="text-center">
-                  <div className="text-4xl font-mono font-bold tracking-wider mb-4 min-h-[4rem] flex items-center justify-center">
+                    <div className="text-6xl font-mono font-bold tracking-wider mb-4 min-h-[4rem] flex items-center justify-center">
                     {displayWord()}
-                  </div>
-                  <Badge
-                    className={isPassedQuestion ? "bg-orange-500 text-lg px-4 py-2" : "bg-amber-600 text-lg px-4 py-2"}
-                  >
+                    </div>
+                  <Badge className={isPassedQuestion ? "bg-[#d9a65a] text-black text-xs px-2 py-1" : "bg-[#44311f] text-[#d9a65a] text-xs px-2 py-1"}>
                     Gold: {isPassedQuestion ? 5 : currentGameWord?.points}
                   </Badge>
                 </div>
@@ -495,14 +715,14 @@ export default function HangmanGame() {
                       <Button
                         onClick={guessLetter}
                         disabled={!inputLetter}
-                        className="h-12 px-6 bg-amber-600 hover:bg-amber-700"
+                        className="h-12 px-6 bg-[#44311f] hover:bg-[#886636] text-[#d9a65a]"
                       >
                         Guess
                       </Button>
                       <Button
                         onClick={passQuestion}
                         variant="outline"
-                        className="h-12 px-4 border-amber-500 text-amber-700 hover:bg-amber-50 bg-transparent"
+                        className="h-12 px-4 border-[#44311f] text-[#44311f] hover:bg-[#d9a65a] hover:bg-opacity-30 bg-transparent"
                       >
                         <ArrowRight className="w-4 h-4 mr-1" />
                         Pass
@@ -520,7 +740,7 @@ export default function HangmanGame() {
                       </div>
                     </div>
 
-                    <div className="text-center text-xs text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
+                    <div className="text-center text-xs text-[#44311f] bg-[#d9a65a] bg-opacity-30 p-3 rounded-lg border border-[#886636]">
                       <p className="font-semibold mb-1">⚔️ Quest Rules ⚔️</p>
                       <p>• Each sacred word is assigned to a tribe in rotation</p>
                       <p>• If a tribe fails, the next tribe may attempt for 5 gold</p>
@@ -531,12 +751,12 @@ export default function HangmanGame() {
 
                 {gameState === "won" && (
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-amber-600 mb-2">🏆 Victory!</div>
+                    <div className="text-3xl font-bold text-[#d9a65a] mb-2">🏆 Victory!</div>
                     <p className="text-lg">
                       +{isPassedQuestion ? 5 : currentGameWord?.points} gold to {teams[currentTeam]?.name}
                     </p>
-                    {isPassedQuestion && <p className="text-sm text-orange-600">Passed quest bonus!</p>}
-                    <p className="text-sm text-amber-600">Moving to next sacred word...</p>
+                    {isPassedQuestion && <p className="text-sm text-[#886636]">Passed quest bonus!</p>}
+                    <p className="text-sm text-[#44311f]">Moving to next sacred word...</p>
                   </div>
                 )}
 
@@ -545,70 +765,20 @@ export default function HangmanGame() {
                     {teamsAttempted.length >= 4 ? (
                       <>
                         <div className="text-3xl font-bold text-red-700 mb-2">📜 Word Revealed!</div>
-                        <p className="text-lg text-amber-800">
+                        <p className="text-lg text-[#44311f]">
                           The sacred word was: <strong>{currentGameWord?.word}</strong>
                         </p>
-                        <p className="text-sm text-amber-600">All tribes have tried. Moving to next quest...</p>
+                        <p className="text-sm text-[#886636]">All tribes have tried. Moving to next quest...</p>
                       </>
                     ) : (
                       <>
-                        <div className="text-3xl font-bold text-orange-600 mb-2">⚡ Quest Failed!</div>
-                        <p className="text-lg text-amber-700">{teams[currentTeam]?.name} could not solve the riddle</p>
-                        <p className="text-sm text-amber-600">Passing to next tribe...</p>
+                        <div className="text-3xl font-bold text-[#d9a65a] mb-2">⚡ Quest Failed!</div>
+                        <p className="text-lg text-[#44311f]">{teams[currentTeam]?.name} could not solve the riddle</p>
+                        <p className="text-sm text-[#886636]">Passing to next tribe...</p>
                       </>
                     )}
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Right Side - Leaderboard */}
-          <div>
-            <Card className="h-full">
-              <CardHeader>
-                <CardTitle className="text-center text-2xl text-amber-800">🏺 Leaderboard</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {teams.map((team, index) => {
-                    const teamScore = gameScores.find((score) => score.team_id === team.id)?.points || 0
-                    const leaderboardPosition = sortedTeams.findIndex((t) => t.id === team.id) + 1
-                    return (
-                      <div
-                        key={team.id}
-                        className={`p-4 rounded-lg border-2 ${
-                          index === currentTeam
-                            ? "border-purple-500 bg-purple-50"
-                            : index === originalTeamForQuestion
-                              ? "border-blue-500 bg-blue-50"
-                              : "border-gray-200"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="text-2xl font-bold">#{leaderboardPosition}</div>
-                            <div className={`w-4 h-4 rounded-full ${team.color}`}></div>
-                            <div className="font-semibold text-lg">
-                              Team {index + 1}: {team.name}
-                            </div>
-                            {index === originalTeamForQuestion && (
-                              <Badge variant="outline" className="text-xs bg-blue-100">
-                                Assigned
-                              </Badge>
-                            )}
-                            {teamsAttempted.includes(index) && (
-                              <Badge variant="outline" className="text-xs">
-                                Attempted
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-2xl font-bold text-purple-600">{teamScore}</div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
               </CardContent>
             </Card>
           </div>
